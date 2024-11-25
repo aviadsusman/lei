@@ -8,14 +8,15 @@ import numpy as np
 import torch.nn.functional as F
 
 class TimeDistributed(nn.Module):
-    def __init__(self, layer, *args, **kwargs):
+    def __init__(self, layer):
         super().__init__()
-        self.layer = layer(*args, **kwargs)
+        self.layer = layer
 
     def forward(self, packed_seq):
         '''
         Pads with -inf assuming layer won't transform values to -inf.
         '''
+
         # Convert PackedSequence to flattened and unpadded 2D tensor.
         padded, lengths = pad_packed_sequence(packed_seq, batch_first=True, padding_value=float('-inf'))
         batch, pad_length, features = padded.shape
@@ -29,11 +30,11 @@ class TimeDistributed(nn.Module):
         # Reassemble into PackedSequence
         processed_features = processed.shape[1]
         if processed_features <= features: # Reshape tensor for insertion of processed unpadded rows
-            flat_reshaped = flat[:, : processed_features] 
+            flat = flat[:, : processed_features] 
         else:
-            flat_reshaped = torch.cat([flat, flat[:,:processed_features-features]], dim=1)
-        flat_reshaped[mask] = processed
-        processed_padded = flat_reshaped.view(batch, pad_length, processed_features)
+            flat = torch.cat([flat, flat[:,:processed_features-features]], dim=1)
+        flat[mask] = processed
+        processed_padded = flat.view(batch, pad_length, processed_features)
         processed_packed_seq = pack_padded_sequence(processed_padded, lengths=lengths, batch_first=True, enforce_sorted=False)
 
         return processed_packed_seq
@@ -55,12 +56,12 @@ class LongitudinalStacker(nn.Module):
         ])
 
         self.norm_layers = nn.ModuleList([
-            TimeDistributed(self.reg_layer, hidden_state_sizes[i], dtype=torch.float64, device=self.device) for i in range(len(hidden_state_sizes))
+            TimeDistributed(self.reg_layer(hidden_state_sizes[i], dtype=torch.float64, device=self.device)) for i in range(len(hidden_state_sizes))
         ])
         
         if self.dropout != 0:
             self.recurrent_dropouts = nn.ModuleList([
-                TimeDistributed(Dropout, p=self.dropout) for i in range(len(hidden_state_sizes))
+                TimeDistributed(Dropout(p=self.dropout)) for i in range(len(hidden_state_sizes))
         ])
         
         if self.classifier == 'longitudinal':
@@ -75,7 +76,7 @@ class LongitudinalStacker(nn.Module):
                                Tanh(),
                                Dropout(self.dropout),
                                Linear(h // 4, 3, dtype=torch.float64, device=self.device)]
-            self.output_layer = TimeDistributed(Sequential, *classifying_mlp,)
+            self.output_layer = TimeDistributed(Sequential(*classifying_mlp))
 
     def forward(self, x, lengths):
         x = pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
@@ -153,29 +154,3 @@ class OCWCCE(nn.Module):
             loss += loss_t
         
         return loss / timepoints
-
-# class TimeDistributed(nn.Module):
-#     def __init__(self, layer, *args, **kwargs):
-#         super().__init__()
-#         self.layer = layer(*args, **kwargs)
-
-#     def forward(self, packed_seq):
-#         padded_seq, seq_lengths = pad_packed_sequence(packed_seq, batch_first=True, padding_value=float('-inf'))
-#         batch, longest_seq, features = padded_seq.shape
-#         flat_seq = padded_seq.view(-1, features)
-#         mask = (flat_seq > float('-inf')).all(dim=1)
-#         flat_seq = flat_seq[mask]
-
-#         processed_flat_seq = self.layer(flat_seq)
-
-#         processed_list = []
-#         start_idx = 0
-#         for size in seq_lengths:
-#             end_idx = start_idx + size
-#             processed_list.append(processed_flat_seq[start_idx:end_idx])
-#             start_idx = end_idx
-
-#         padded_seq = pad_sequence(processed_list, batch_first=True, padding_value=float('-inf'))
-#         packed_seq = pack_padded_sequence(padded_seq, lengths=seq_lengths, batch_first=True, enforce_sorted=False)
-
-#         return packed_seq
