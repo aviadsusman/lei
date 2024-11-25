@@ -18,20 +18,25 @@ class TimeDistributed(nn.Module):
         '''
         # Convert PackedSequence to flattened and unpadded 2D tensor.
         padded, lengths = pad_packed_sequence(packed_seq, batch_first=True, padding_value=float('-inf'))
-        flat = padded.view(-1, padded.shape[-1]) # flat.shape = (batch * pad_length, features)
-        mask = (flat != float('-inf')).all(dim=1)
+        batch, pad_length, features = padded.shape
+        flat = padded.view(-1, features) # flat.shape = (batch * pad_length, features)
+        mask = (flat != float('-inf')).any(dim=1)
         flat_unpadded = flat[mask]
 
         # Apply the layer
         processed = self.layer(flat_unpadded)
         
         # Reassemble into PackedSequence
-        flat[:,:processed.shape[1]][mask] = processed # Slice flat tensor to match processed tensor shape
-        repadded = flat.view(padded.shape)
-        print(padded.shape, flat.shape, processed.shape, repadded.shape)
-        repacked_seq = pack_padded_sequence(repadded, lengths=lengths, batch_first=True, enforce_sorted=False)
+        processed_features = processed.shape[1]
+        if processed_features <= features: # Reshape tensor for insertion of processed unpadded rows
+            flat_reshaped = flat[:, : processed_features] 
+        else:
+            flat_reshaped = torch.cat([flat, flat[:,:processed_features-features]], dim=1)
+        flat_reshaped[mask] = processed
+        processed_padded = flat_reshaped.view(batch, pad_length, processed_features)
+        processed_packed_seq = pack_padded_sequence(processed_padded, lengths=lengths, batch_first=True, enforce_sorted=False)
 
-        return repacked_seq
+        return processed_packed_seq
 
 class LongitudinalStacker(nn.Module):
     def __init__(self, cell, input_size, hidden_state_sizes, dropout, reg_layer, classifier):
