@@ -1,0 +1,16 @@
+#!/bin/bash
+#BSUB -P acc_pandeg01a
+#BSUB -q premium
+#BSUB -J 405240o
+#BSUB -W 12:00
+#BSUB -R rusage[mem=10000]
+#BSUB -R span[hosts=1]
+#BSUB -n 4
+#BSUB -o /sc/arion/projects/pandeg01a/susmaa01/lei/longitudinal_tadpole_v2/bps/outputs/outputs_%J.stdout
+#BSUB -eo /sc/arion/projects/pandeg01a/susmaa01/lei/longitudinal_tadpole_v2/bps/outputs/outputs_%J.stderr
+
+echo "salve mundi"
+cd /sc/arion/projects/pandeg01a/susmaa01/lei
+source .venv/bin/activate
+export PYTHONPATH=/sc/arion/projects/pandeg01a/susmaa01/lei:$PYTHONPATH
+python3 longitudinal_tadpole_v2/bps/bps.py --col_thresh 40 --row_thresh 5 --longest_gap 24 --split 0 --sampling oversampling

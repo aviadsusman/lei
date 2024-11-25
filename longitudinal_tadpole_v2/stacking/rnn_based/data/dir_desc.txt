@@ -1,0 +1,1 @@
+Directory contains data prepared for RNN based models. Contains preprocessed BP data and raw data.

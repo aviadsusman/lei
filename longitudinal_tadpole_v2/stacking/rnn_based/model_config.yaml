@@ -1,0 +1,62 @@
+model_config_0:
+  cell: "LSTM"                        # Options: RNN, GRU, LSTM,
+  input_size: 210                     # Number of features for model
+  hidden_state_sizes:                 # List of hidden state sizes for the layers
+    - 32
+  dropout: 0.                         # Dropout rate for regularization or None
+  regularization_layer: "LayerNorm"   # Options: LayerNorm, BatchNorm1d, None
+  classifier: "longitudinal"          # LSTM classifier VS MLP
+  optimization:
+    optimizer: "Adam"                 # Options: SGD, Adam, etc.
+    lr: 0.001                         # Learning rate for optimizer or None
+  loss: "OCWCCE"                      # Loss function to optimize
+  gamma: 0                            # Hyperparameter for relative ordinal weighting
+  batch: 64                           # Batch size
+
+# Shallower LSTM
+model_config_1:
+  cell: "LSTM"                        # Options: RNN, GRU, LSTM,
+  input_size: 210                     # Number of features for model
+  hidden_state_sizes:                 # List of hidden state sizes for the layers
+    - 32
+  dropout: 0                          # Dropout rate for regularization or None
+  regularization_layer: "LayerNorm"   # Options: LayerNorm, BatchNorm1d, None
+  classifier: "longitudinal"          # LSTM classifier VS MLP
+  optimization:
+    optimizer: "Adam"                 # Options: SGD, Adam, etc.
+    lr: 0.001                         # Learning rate for optimizer or None
+  loss: "OCWCCE"                      # Loss function to optimize
+  gamma: 0                            # Hyperparameter for relative ordinal weighting
+  batch: 64                           # Batch size
+
+# Time distributed classifier. Changed how dropout is psased in.
+model_config_2:
+  cell: "LSTM"                        # Options: RNN, GRU, LSTM,
+  input_size: 210                     # Number of features for model
+  hidden_state_sizes:                 # List of hidden state sizes for the layers
+    - 32
+  dropout: 0.2                        # Dropout rate for regularization or None
+  regularization_layer: "LayerNorm"   # Options: LayerNorm, BatchNorm1d, None
+  classifier: "time distributed"      # LSTM classifier VS MLP
+  optimization:
+    optimizer: "Adam"                 # Options: SGD, Adam, etc.
+    lr: 0.001                         # Learning rate for optimizer or None
+  loss: "OCWCCE"                      # Loss function to optimize
+  gamma: 0                            # Hyperparameter for relative ordinal weighting
+  batch: 64                           # Batch size
+
+# Replicate best model from longitudinal_tadpole_v1
+model_config_3:
+  cell: "LSTM"                        # Options: RNN, GRU, LSTM,
+  input_size: 210                     # Number of features for model
+  hidden_state_sizes:                 # List of hidden state sizes for the layers
+    - 32
+  dropout: 0.2                        # Dropout rate for regularization or None
+  regularization_layer: "BatchNorm1d" # Options: LayerNorm, BatchNorm1d, None
+  classifier: "time distributed"      # LSTM classifier VS MLP
+  optimization:
+    optimizer: "Adam"                 # Options: SGD, Adam, etc.
+    lr: 0.001                         # Learning rate for optimizer or None
+  loss: "OCWCCE"                      # Loss function to optimize
+  gamma: 0                            # Hyperparameter for relative ordinal weighting
+  batch: 32                           # Batch size
