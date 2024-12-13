@@ -169,7 +169,7 @@ class OCE(nn.Module):
     '''
     Ordinal Cross Entropy Loss. A log loss term for each class probability weighted by ordinal distance.
     The term for the true class is -log(x), all other terms are -log(1-x).
-    Changing distance between adjacent classes is accoutned with tuneable gamma hyperparameter.
+    Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
     '''
     def __init__(self, gamma=0):
         super(OCE, self).__init__()
@@ -216,7 +216,38 @@ class OCE(nn.Module):
         return loss / timepoints
             
 
+class MEE(nn.Module):
+    '''
+    Mean Expected Error Loss. Compute the MSE between true class and expected class index.
+    Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
+    '''
+    def __init__(self, gamma=0):
+        super(MEE, self).__init__()
+        self.gamma = gamma
+    
 
+    def forward(self, logits, targets):
+        batch, timepoints, classes = logits.shape
+        class_weights = timed_class_weights(targets)
+        
+        loss = 0
+        for t in range(timepoints):
+            # Filter and activate
+            logits_t = filter_padding(logits[:,t,:])  
+            preds_t = F.softmax(logits_t, dim=-1)
+            targets_t = filter_padding(targets[:,t])
+            
+            # Get batch length vector of class weights
+            wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
+            
+            g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
+            ordinal_dist = torch.tensor(g(torch.arange(classes))).to(torch.float64)
+
+            loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2)
+            loss += loss_t
+
+        return loss / timepoints
+            
 
             
 

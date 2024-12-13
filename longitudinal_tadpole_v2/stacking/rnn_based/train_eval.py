@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.nn import LSTM, GRU, RNN, LayerNorm, BatchNorm1d
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
-from models import LongitudinalStacker, OCWCCE, OCE
+from models import LongitudinalStacker, OCWCCE, OCE, MEE
 import yaml
 import argparse
 import pickle as pkl
@@ -16,7 +16,7 @@ def build_model(cell, input_size, hidden_state_sizes, dropout,
     cell_type = {'LSTM': LSTM, 'GRU': GRU, 'RNN': RNN}
     reg_type = {'LayerNorm': LayerNorm, 'BatchNorm1d': BatchNorm1d}
     optimizer_type = {'SGD': SGD, 'Adam': Adam}
-    loss_type = {'OCWCCE': OCWCCE, 'OCE': OCE}
+    loss_type = {'OCWCCE': OCWCCE, 'OCE': OCE, 'MEE': MEE}
     
     cell = cell_type[cell]
     reg_layer = reg_type[regularization_layer]

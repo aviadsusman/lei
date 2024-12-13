@@ -76,3 +76,19 @@ model_config_4:
   loss: "OCE"                         # Loss function to optimize
   gamma: 0                            # Hyperparameter for relative ordinal weighting
   batch: 32                           # Batch size
+
+# New mean expected error loss
+model_config_5:
+  cell: "LSTM"                        # Options: RNN, GRU, LSTM,
+  input_size: 210                     # Number of features for model
+  hidden_state_sizes:                 # List of hidden state sizes for the layers
+    - 32
+  dropout: 0.2                        # Dropout rate for regularization or None
+  regularization_layer: "BatchNorm1d" # Options: LayerNorm, BatchNorm1d, None
+  classifier: "time distributed"      # LSTM classifier VS MLP
+  optimization:
+    optimizer: "Adam"                 # Options: SGD, Adam, etc.
+    lr: 0.001                         # Learning rate for optimizer or None
+  loss: "MEE"                         # Loss function to optimize
+  gamma: 0                            # Hyperparameter for relative ordinal weighting
+  batch: 32                           # Batch size
