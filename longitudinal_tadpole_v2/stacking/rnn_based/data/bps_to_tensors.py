@@ -40,7 +40,6 @@ def recover_id_vis(ei):
     # y for stratification
     y = core_cohort['other', 'DX']
     
-
     # replicate nested CV on RID and VISCODE columns    
     ensemble_test_id = [ids.iloc[test_idx].reset_index(drop=True) for _, test_idx in ei.cv_outer.split(ids, y, groups=ei.groups)]
     ensemble_train_id = []

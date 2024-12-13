@@ -96,53 +96,63 @@ class LongitudinalStacker(nn.Module):
         x = pad_packed_sequence(x, batch_first=True, padding_value=float('-inf'))[0]
         return x
 
+# Helper functions for losses
+def filter_padding(tensor):
+    '''
+    Return dense tensors for loss computation.
+    '''
+    if tensor.dim() == 1: # labels at time point
+        return tensor[tensor > float('-inf')]
+
+    elif tensor.dim() == 2: # logits at time point
+        mask = (tensor > float('-inf')).all(dim=1)
+        return tensor[mask]
+
+def timed_class_weights(targets, classes=[0,1,2]):
+    '''
+    Get time-dependent class weights from batch.
+    '''
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    timed_weights = []
+    for y_time in torch.transpose(targets,0,1): #iterate over time slices
+        y_time = filter_padding(y_time)
+        y_time = torch.tensor([(y_time==class_label).sum() for class_label in classes])
+        weights = sum(y_time) / (len(y_time) * y_time)
+        timed_weights.append(weights.to(device, dtype=torch.long))
+
+    return timed_weights
+
+def ordinal_weights(pred, target, gamma=0):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    pred_class = torch.argmax(pred, dim=1).to(torch.float64)
+
+    target[target != 0] += gamma
+    pred_class[pred_class != 0] += gamma
+
+    ordinal_weight_tensor = torch.abs(pred_class - target) / (2 + gamma)
+    return ordinal_weight_tensor.to(device)
+
 class OCWCCE(nn.Module):
     def __init__(self, gamma=0):
         super(OCWCCE, self).__init__()
         self.gamma = gamma
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    def _filter_padding(self, tensor):
-        if tensor.dim() == 1: # labels at time point
-            return tensor[tensor > float('-inf')]
-
-        elif tensor.dim() == 2: # logits at time point
-            mask = (tensor > float('-inf')).all(dim=1)
-            return tensor[mask]
-
-    def _label_count(self, array):
-        return torch.tensor([(array==label).sum() for label in [0,1,2]])
-        
-    def _class_weights_t(self, y_time):
-        y_time = self._label_count(self._filter_padding(y_time))
-        weights = sum(y_time) / (len(y_time) * y_time)
-
-        return weights.to(self.device, dtype=torch.long)
-    
-    def _ordinal_weights(self, pred, target, gamma):
-        pred_class = torch.argmax(pred, dim=1).to(torch.float64)
-
-        target[target != 0] += gamma
-        pred_class[pred_class != 0] += gamma
-
-        ordinal_weight_tensor = torch.abs(pred_class - target) / (2 + gamma)
-        return ordinal_weight_tensor.to(self.device)
         
     def forward(self, logits, targets):
         timepoints = logits.shape[1]
-        class_weights = [self._class_weights_t(targets[:,t]) for t in range(timepoints)]
+        class_weights = timed_class_weights(targets)
 
         loss = 0
         for t in range(timepoints):
-            logits_t = self._filter_padding(logits[:,t,:])  
+            logits_t = filter_padding(logits[:,t,:])  
             preds_t = F.softmax(logits_t, dim=-1)
 
-            targets_t = self._filter_padding(targets[:,t])
+            targets_t = filter_padding(targets[:,t])
   
             wc_t = class_weights[t][targets_t.to(int)]
 
             if self.gamma is not None:
-                wo_t = self._ordinal_weights(preds_t, targets_t, gamma=self.gamma)
+                wo_t = ordinal_weights(preds_t, targets_t, gamma=self.gamma)
             else:
                 wo_t = torch.ones(len(targets_t), dtype=torch.float64, device=self.device) # tensor of all ones for ablating ordinal weights
             
@@ -154,3 +164,97 @@ class OCWCCE(nn.Module):
             loss += loss_t
         
         return loss / timepoints
+
+class OCE(nn.Module):
+    '''
+    Ordinal Cross Entropy Loss. A log loss term for each class probability weighted by ordinal distance.
+    The term for the true class is -log(x), all other terms are -log(1-x).
+    Changing distance between adjacent classes is accoutned with tuneable gamma hyperparameter.
+    '''
+    def __init__(self, gamma=0):
+        super(OCE, self).__init__()
+        self.gamma = gamma
+    
+    def _adjust_proba(self, proba, true_class):
+        ''' 
+        A function for determining how to penalize a predicted probability.
+        '''
+        if true_class:
+            return proba
+        else:
+            return 1 - proba
+
+    def forward(self, logits, targets):
+        batch, timepoints, classes = logits.shape
+        class_weights = timed_class_weights(targets)
+        
+        loss = 0
+        for t in range(timepoints):
+            # Filter and activate
+            logits_t = filter_padding(logits[:,t,:])  
+            preds_t = F.softmax(logits_t, dim=-1)
+            targets_t = filter_padding(targets[:,t])
+            
+            # Get batch length vector of class weights
+            wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
+            
+            # Construct matrix of shape (batch, classes) indicating true class of each sample
+            true_class_mask = torch.zeros_like(logits_t).scatter_(1, targets_t.unsqueeze(1).to(torch.int64), 1.0)
+            
+            # Construct matrix of ordinal distances of shape (batch, classes).
+            g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
+            indices_t = torch.tensor(g(torch.arange(classes))).expand(len(targets_t), classes)
+            adjusted_targets_t = torch.tensor(g(targets_t)).unsqueeze(1)
+            ordinal_dist = (torch.abs(indices_t-adjusted_targets_t) / (classes - 1 + self.gamma) + 1) * (1-true_class_mask)
+
+            log_true_class = -torch.log(preds_t)
+            log_false_class = -torch.log(1 - preds_t)
+
+            log_loss_matrix = wc_t * (true_class_mask * log_true_class + ordinal_dist * log_false_class)
+            loss += torch.mean(torch.mean(log_loss_matrix, dim=1))
+        
+        return loss / timepoints
+            
+
+
+
+            
+
+            
+            
+
+
+
+
+
+# class TimeWeightedMSE(nn.Module):
+#     def __init__(weighted=True):
+#         super(TimeWeightedMSE).__init__()
+    
+#     def _class_weights_t(self, y_time):
+#         y_time = self._label_count(self._filter_padding(y_time))
+#         weights = sum(y_time) / (len(y_time) * y_time)
+
+#         return weights.to(self.device, dtype=torch.long)
+    
+#     def _weighted_dist(true, pred, weighted=True, p=2):
+#         if p==1:
+#             #fix to make differentiable
+#             pred = np.argmax(pred, axis=-1)
+#             lp = np.abs(true-pred)
+#         elif p==2:
+#             pred = pred @ torch.tensor([0,1,2])
+#             lp = torch.sqrt((true-pred)**2)
+        
+#         if weighted:
+#             weights = torch.tensor([class_weights[i][int(value)] for i,value in enumerate(true)])
+#             return torch.mean(lp * weights)
+#         else:
+#             return torch.mean(lp)
+
+#     def forward(self, logits, targets):
+#         timepoints = logits.shape[1]
+#         class_weights = [self._class_weights_t(targets[:,t]) for t in range(timepoints)]
+
+#         loss = 0
+        
