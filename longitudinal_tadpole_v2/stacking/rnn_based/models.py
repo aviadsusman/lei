@@ -211,12 +211,12 @@ class OCE(nn.Module):
             g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
             indices_t = torch.tensor(g(torch.arange(classes))).expand(len(targets_t), classes)
             adjusted_targets_t = torch.tensor(g(targets_t)).unsqueeze(1)
-            ordinal_dist = (torch.abs(indices_t-adjusted_targets_t) / (classes - 1 + self.gamma) + 1) * (1-true_class_mask)
+            wo_t = (torch.abs(indices_t-adjusted_targets_t) / (classes - 1 + self.gamma) + 1) * (1-true_class_mask)
 
             log_true_class = -torch.log(preds_t)
             log_false_class = -torch.log(1 - preds_t)
 
-            log_loss_matrix = wc_t * (true_class_mask * log_true_class + ordinal_dist * log_false_class)
+            log_loss_matrix = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class)
             loss += torch.mean(torch.mean(log_loss_matrix, dim=1))
         
         return loss / timepoints
@@ -247,51 +247,9 @@ class MEE(nn.Module):
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
             
             g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
-            ordinal_dist = torch.tensor(g(torch.arange(classes))).to(torch.float64)
+            ordinal_dist = torch.tensor(g(torch.arange(classes)), dtype=torch.float64)
 
             loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2)
             loss += loss_t
 
         return loss / timepoints
-            
-
-            
-
-            
-            
-
-
-
-
-
-# class TimeWeightedMSE(nn.Module):
-#     def __init__(weighted=True):
-#         super(TimeWeightedMSE).__init__()
-    
-#     def _class_weights_t(self, y_time):
-#         y_time = self._label_count(self._filter_padding(y_time))
-#         weights = sum(y_time) / (len(y_time) * y_time)
-
-#         return weights.to(self.device, dtype=torch.long)
-    
-#     def _weighted_dist(true, pred, weighted=True, p=2):
-#         if p==1:
-#             #fix to make differentiable
-#             pred = np.argmax(pred, axis=-1)
-#             lp = np.abs(true-pred)
-#         elif p==2:
-#             pred = pred @ torch.tensor([0,1,2])
-#             lp = torch.sqrt((true-pred)**2)
-        
-#         if weighted:
-#             weights = torch.tensor([class_weights[i][int(value)] for i,value in enumerate(true)])
-#             return torch.mean(lp * weights)
-#         else:
-#             return torch.mean(lp)
-
-#     def forward(self, logits, targets):
-#         timepoints = logits.shape[1]
-#         class_weights = [self._class_weights_t(targets[:,t]) for t in range(timepoints)]
-
-#         loss = 0
-        
