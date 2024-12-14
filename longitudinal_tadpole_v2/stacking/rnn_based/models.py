@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 class TimeDistributed(nn.Module):
     '''
-    A general torch layer for time-distributed processing on packed sequence objects.
+    A general torch wrapper for time-distributed processing on packed sequence objects.
     '''
     def __init__(self, layer):
         super().__init__()
@@ -44,7 +44,8 @@ class TimeDistributed(nn.Module):
 
 class LongitudinalStacker(nn.Module):
     '''
-    Cofigurable Longitudinal Stacker. Can customize architecture, cell type, regularization, and classification head.
+    Cofigurable Longitudinal Stacker. 
+    Can customize architecture, cell type, regularization, and classification head.
     '''
     def __init__(self, cell, input_size, hidden_state_sizes, dropout, reg_layer, classifier):
         super(LongitudinalStacker, self).__init__()
@@ -139,6 +140,9 @@ def ordinal_weights(pred, target, gamma=0):
     return ordinal_weight_tensor.to(device)
 
 class OCWCCE(nn.Module):
+    '''
+    Ordinally weighted categorical cross-entropy with class weighting across time.
+    '''
     def __init__(self, gamma=0):
         super(OCWCCE, self).__init__()
         self.gamma = gamma
