@@ -141,7 +141,7 @@ def ordinal_weights(pred, target, gamma=0):
 
 class OCWCCE(nn.Module):
     '''
-    Ordinally weighted categorical cross-entropy with class weighting across time.
+    Ordinally weighted categorical cross-entropy loss with class weighting across time.
     '''
     def __init__(self, gamma=0):
         super(OCWCCE, self).__init__()
@@ -177,7 +177,7 @@ class OCWCCE(nn.Module):
 
 class OCE(nn.Module):
     '''
-    Ordinal Cross Entropy Loss. A log loss term for each class probability weighted by ordinal distance.
+    Ordinal Cross Entropy loss. A log loss term for each class probability weighted by ordinal distance.
     The term for the true class is -log(x), all other terms are -log(1-x).
     Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
     '''
@@ -228,14 +228,13 @@ class OCE(nn.Module):
 
 class MEE(nn.Module):
     '''
-    Mean Expected Error Loss. Compute the MSE between true class and expected class index.
+    Mean Expected Error loss. Compute the MSE between true class and expected class index.
     Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
     '''
     def __init__(self, gamma=0):
         super(MEE, self).__init__()
         self.gamma = gamma
     
-
     def forward(self, logits, targets):
         batch, timepoints, classes = logits.shape
         class_weights = timed_class_weights(targets)
@@ -257,3 +256,33 @@ class MEE(nn.Module):
             loss += loss_t
 
         return loss / timepoints
+
+class MPE(nn.Module):
+    '''
+    Mean Predicted Error loss. Compute the MSE between true class and expected class index.
+    Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
+    Used as an ablation of the class expectation in the MEE loss.
+    '''
+    def __init__(self, gamma=0):
+        super(MPE, self).__init__()
+        self.gamma = gamma
+
+    def forward(self, logits, targets):
+        batch, timepoints, classes = logits.shape
+        class_weights = timed_class_weights(targets)
+
+        loss = 0
+        for t in range(timepoints):
+            # Filter and activate
+            logits_t = filter_padding(logits[:,t,:])  
+            preds_t = F.softmax(logits_t, dim=-1)
+            targets_t = filter_padding(targets[:,t])
+            
+            # Get batch length vector of class weights
+            wc_t = class_weights[t][targets_t.to(int)]
+            wo_t = ordinal_weights(preds_t, targets_t, gamma=self.gamma)
+
+            loss_t = torch.mean(wc_t * wo_t)
+            loss += loss_t
+
+        return (loss / timepoints).requires_grad_()

@@ -89,6 +89,6 @@ model_config_5:
   optimization:
     optimizer: "Adam"                 # Options: SGD, Adam, etc.
     lr: 0.001                         # Learning rate for optimizer or None
-  loss: "MEE"                         # Loss function to optimize
+  loss: "MPE"                         # Loss function to optimize
   gamma: 0                            # Hyperparameter for relative ordinal weighting
   batch: 32                           # Batch size
