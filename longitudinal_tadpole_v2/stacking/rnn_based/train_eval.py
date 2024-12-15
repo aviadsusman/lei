@@ -5,17 +5,19 @@ from torch.nn import LSTM, GRU, RNN, LayerNorm, BatchNorm1d
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
 from models import LongitudinalStacker, OCWCCE, OCE, MEE, MPE
+import numpy as np
 import yaml
 import argparse
 import pickle as pkl
 import os
+from copy import deepcopy
 
 def build_model(cell, input_size, hidden_state_sizes, dropout,
                 regularization_layer, classifier, optimization, loss, gamma, batch):
     
     cell_type = {'LSTM': LSTM, 'GRU': GRU, 'RNN': RNN}
     reg_type = {'LayerNorm': LayerNorm, 'BatchNorm1d': BatchNorm1d}
-    optimizer_type = {'SGD': SGD, 'Adam': Adam}
+    optimizer_type = {'Adam': Adam, 'SGD': SGD}
     loss_type = {'OCWCCE': OCWCCE, 'OCE': OCE, 'MEE': MEE, 'MPE': MPE}
     
     cell = cell_type[cell]
@@ -58,18 +60,42 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
             train_dataset = TensorDataset(X_train, y_train, train_lengths)
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-            model.train()
-            for epoch in range(num_epochs):
+            # Early stopping setup. Add to configuration?
+            patience = 5
+            count = 0
+            best_val_loss = float('inf')
+
+            epoch = 0
+            while count <= patience:
+                model.train()
+                train_losses = []
                 for X_batch, y_batch, lengths_batch in train_loader:
                     optimizer.zero_grad()
                     outputs = model(X_batch, lengths_batch)
-                    loss = loss_fn(outputs, y_batch)
-                    loss.backward()
+                    train_loss = loss_fn(outputs, y_batch)
+                    train_loss.backward()
                     optimizer.step()
-                #ADD EARLY STOPPING FOR METRIC OF CHOOSING. FIRST ADD TENSORBOARD TO MONITOR TRAINING
-                print(f'Epoch {epoch+1}: Training loss:', round(float(loss), 4))
+                    train_losses.append(float(train_loss))
+                report = f'Epoch {epoch}: Train loss: {round(np.mean(train_losses), 4)}'
+                # Early stopping
+                if epoch >= 5: # equivalent to start_from_epoch in keras EarlyStopping
+                    model.eval()
+                    with torch.no_grad():
+                        outputs = model(X_val, val_lengths)
+                        val_loss = loss_fn(outputs, y_val)
+                        if float(val_loss) < best_val_loss:
+                            best_val_loss = val_loss
+                            best_model_state = deepcopy(model.state_dict())
+                            count = 0
+                        else:
+                            count += 1
+                
+                    report = report + ': Val loss:', round(float(val_loss), 4)
+                
+                print(report)
+                epoch += 1
 
-            model.eval()
+            model.load_state_dict(best_model_state)
             with torch.no_grad():
                 outputs = model(X_test, test_lengths)
                 predicted = F.softmax(outputs, -1)

@@ -121,11 +121,11 @@ def timed_class_weights(targets, classes=[0,1,2]):
     '''
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     timed_weights = []
-    for y_time in torch.transpose(targets,0,1): #iterate over time slices
+    for y_time in targets.T: #iterate over time slices
         y_time = filter_padding(y_time)
         y_time = torch.tensor([(y_time==class_label).sum() for class_label in classes])
         weights = sum(y_time) / (len(y_time) * y_time)
-        timed_weights.append(weights.to(device, dtype=torch.long))
+        timed_weights.append(weights.to(device))
 
     return timed_weights
 
@@ -184,6 +184,7 @@ class OCE(nn.Module):
     def __init__(self, gamma=0):
         super(OCE, self).__init__()
         self.gamma = gamma
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     def _adjust_proba(self, proba, true_class):
         ''' 
@@ -197,24 +198,24 @@ class OCE(nn.Module):
     def forward(self, logits, targets):
         batch, timepoints, classes = logits.shape
         class_weights = timed_class_weights(targets)
-        
+
         loss = 0
         for t in range(timepoints):
             # Filter and activate
             logits_t = filter_padding(logits[:,t,:])  
             preds_t = F.softmax(logits_t, dim=-1)
             targets_t = filter_padding(targets[:,t])
-            
+
             # Get batch length vector of class weights
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
-            
+
             # Construct matrix of shape (batch, classes) indicating true class of each sample
-            true_class_mask = torch.zeros_like(logits_t).scatter_(1, targets_t.unsqueeze(1).to(torch.int64), 1.0)
+            true_class_mask = torch.zeros_like(logits_t).scatter_(1, targets_t.unsqueeze(1).to(torch.int64), 1.0).to(self.device)
             
             # Construct matrix of ordinal distances of shape (batch, classes).
             g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
-            indices_t = torch.tensor(g(torch.arange(classes))).expand(len(targets_t), classes)
-            adjusted_targets_t = torch.tensor(g(targets_t)).unsqueeze(1)
+            indices_t = torch.tensor(g(torch.arange(classes))).expand(len(targets_t), classes).to(self.device)
+            adjusted_targets_t = torch.tensor(g(targets_t.cpu())).unsqueeze(1).to(self.device)
             wo_t = (torch.abs(indices_t-adjusted_targets_t) / (classes - 1 + self.gamma) + 1) * (1-true_class_mask)
 
             log_true_class = -torch.log(preds_t)
@@ -222,7 +223,7 @@ class OCE(nn.Module):
 
             log_loss_matrix = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class)
             loss += torch.mean(torch.mean(log_loss_matrix, dim=1))
-        
+
         return loss / timepoints
             
 
@@ -234,7 +235,7 @@ class MEE(nn.Module):
     def __init__(self, gamma=0):
         super(MEE, self).__init__()
         self.gamma = gamma
-    
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     def forward(self, logits, targets):
         batch, timepoints, classes = logits.shape
         class_weights = timed_class_weights(targets)
@@ -250,7 +251,7 @@ class MEE(nn.Module):
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
             
             g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
-            ordinal_dist = torch.tensor(g(torch.arange(classes)), dtype=torch.float64)
+            ordinal_dist = torch.tensor(g(torch.arange(classes)), dtype=torch.float64).to(self.device)
 
             loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2)
             loss += loss_t
