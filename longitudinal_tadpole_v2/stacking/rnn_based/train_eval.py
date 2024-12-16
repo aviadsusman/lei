@@ -66,7 +66,7 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
             best_val_loss = float('inf')
 
             epoch = 0
-            while count <= patience:
+            while count < patience:
                 model.train()
                 train_losses = []
                 for X_batch, y_batch, lengths_batch in train_loader:
@@ -77,8 +77,9 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
                     optimizer.step()
                     train_losses.append(float(train_loss))
                 report = f'Epoch {epoch}: Train loss: {round(np.mean(train_losses), 4)}'
+                
                 # Early stopping
-                if epoch >= 5: # equivalent to start_from_epoch in keras EarlyStopping
+                if epoch >= 5:
                     model.eval()
                     with torch.no_grad():
                         outputs = model(X_val, val_lengths)
@@ -90,7 +91,7 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
                         else:
                             count += 1
                 
-                    report = report + ': Val loss:', round(float(val_loss), 4)
+                    report = report + f': Val loss: {round(float(val_loss), 4)}'
                 
                 print(report)
                 epoch += 1

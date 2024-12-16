@@ -19,4 +19,4 @@ ml cuda/12.0.1
 ml cudnn/8.9.5-11
 export XLA_FLAGS=--xla_gpu_cuda_data_dir=/hpc/packages/minerva-centos7/cuda/12.0.1
 nvidia-smi
-python3 train_eval.py --data data/bps/no_sampling/40_5_24_no_mode_data/split_cv_tensors.pkl --config 7
+python3 train_eval.py --data data/bps/no_sampling/40_5_24_no_mode_data/split_cv_tensors.pkl --config 6

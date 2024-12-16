@@ -129,15 +129,39 @@ def timed_class_weights(targets, classes=[0,1,2]):
 
     return timed_weights
 
+def g(vec, gamma=0):
+    '''
+    Shifts ordinal representations to reflect true diagnosis relationships.
+    '''
+    vec[vec != 0] += gamma
+    return vec
+
 def ordinal_weights(pred, target, gamma=0):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pred_class = torch.argmax(pred, dim=1).to(torch.float64)
 
-    target[target != 0] += gamma
-    pred_class[pred_class != 0] += gamma
+    target = g(target, gamma=gamma)
+    pred_class = g(pred_class, gamma=gamma)
+    # target[target != 0] += gamma
+    # pred_class[pred_class != 0] += gamma
 
     ordinal_weight_tensor = torch.abs(pred_class - target) / (2 + gamma)
     return ordinal_weight_tensor.to(device)
+
+def exp_arg(preds, gamma=0):
+    '''
+    A regularizing term for penalizing the distance between the expected class
+    and the argmax of predicted probabilities. Specifically, this term prevents
+    MCI from being the least predicted class (U shaped distributions).
+    '''
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    indices = g(torch.arange(preds.shape[1]), gamma=gamma).to(device).double()
+    exp = preds @ indices
+
+    arg = torch.argmax(preds, dim=-1)
+    
+    return (exp-arg)**2
 
 class OCWCCE(nn.Module):
     '''
@@ -210,19 +234,19 @@ class OCE(nn.Module):
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
 
             # Construct matrix of shape (batch, classes) indicating true class of each sample
-            true_class_mask = torch.zeros_like(logits_t).scatter_(1, targets_t.unsqueeze(1).to(torch.int64), 1.0).to(self.device)
-            
+            true_class_mask = F.one_hot(targets_t.long(), classes)
+
             # Construct matrix of ordinal distances of shape (batch, classes).
-            g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
-            indices_t = torch.tensor(g(torch.arange(classes))).expand(len(targets_t), classes).to(self.device)
-            adjusted_targets_t = torch.tensor(g(targets_t.cpu())).unsqueeze(1).to(self.device)
+            indices_t = g(torch.arange(classes), gamma=self.gamma).expand(len(targets_t), classes)
+            adjusted_targets_t = g(targets_t, gamma=self.gamma).unsqueeze(1)
             wo_t = (torch.abs(indices_t-adjusted_targets_t) / (classes - 1 + self.gamma) + 1) * (1-true_class_mask)
 
             log_true_class = -torch.log(preds_t)
             log_false_class = -torch.log(1 - preds_t)
 
             log_loss_matrix = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class)
-            loss += torch.mean(torch.mean(log_loss_matrix, dim=1))
+            loss_t = torch.mean(log_loss_matrix, dim=1) + exp_arg(preds_t, gamma=self.gamma)
+            loss += torch.mean(loss_t)
 
         return loss / timepoints
             
@@ -250,10 +274,9 @@ class MEE(nn.Module):
             # Get batch length vector of class weights
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
             
-            g = np.vectorize(lambda x: x+self.gamma if x!=0 else x)
-            ordinal_dist = torch.tensor(g(torch.arange(classes)), dtype=torch.float64).to(self.device)
-
-            loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2)
+            ordinal_dist = g(torch.arange(classes), gamma=self.gamma)
+            targets_t = g(targets_t, gamma=self.gamma)
+            loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2 + exp_arg(preds_t, gamma=self.gamma))
             loss += loss_t
 
         return loss / timepoints
@@ -283,7 +306,7 @@ class MPE(nn.Module):
             wc_t = class_weights[t][targets_t.to(int)]
             wo_t = ordinal_weights(preds_t, targets_t, gamma=self.gamma)
 
-            loss_t = torch.mean(wc_t * wo_t)
+            loss_t = torch.mean(wc_t * wo_t + exp_arg(preds_t, gamma=self.gamma))
             loss += loss_t
 
         return (loss / timepoints).requires_grad_()
