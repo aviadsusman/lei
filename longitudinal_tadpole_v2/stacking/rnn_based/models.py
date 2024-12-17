@@ -160,8 +160,17 @@ def exp_arg(preds, gamma=0):
     exp = preds @ indices
 
     arg = torch.argmax(preds, dim=-1)
-    
-    return (exp-arg)**2
+
+    # ranges from 0 to 1
+    return ((exp - arg) / (preds.shape[1] - 1))**2
+
+def retrogression(preds, t, t_prime):
+    '''
+    A weight for discouraging retrogressive predictions.
+    Once the model predicts dementia (at time t_prime) it should predict
+    dementia at all future time points. 
+    '''
+    return (1 + (torch.argmax(preds, dim=-1) - 2) / 2)**torch.max(torch.tensor([0, t-t_prime]))
 
 class OCWCCE(nn.Module):
     '''
@@ -204,10 +213,12 @@ class OCE(nn.Module):
     Ordinal Cross Entropy loss. A log loss term for each class probability weighted by ordinal distance.
     The term for the true class is -log(x), all other terms are -log(1-x).
     Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
+    Similar to: https://aclanthology.org/2022.coling-1.407/ with term for positive class and variable ordinal distances.
     '''
-    def __init__(self, gamma=0):
+    def __init__(self, ea_reg = False, gamma=0):
         super(OCE, self).__init__()
         self.gamma = gamma
+        self.ea_reg = ea_reg
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     def _adjust_proba(self, proba, true_class):
@@ -243,9 +254,9 @@ class OCE(nn.Module):
 
             log_true_class = -torch.log(preds_t)
             log_false_class = -torch.log(1 - preds_t)
-
-            log_loss_matrix = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class)
-            loss_t = torch.mean(log_loss_matrix, dim=1)# + exp_arg(preds_t, gamma=self.gamma)
+            
+            # push wc_t outside reg term
+            loss_t = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class + self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
             loss += torch.mean(loss_t)
 
         return loss / timepoints
@@ -256,9 +267,10 @@ class MEE(nn.Module):
     Mean Expected Error loss. Compute the MSE between true class and expected class index.
     Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
     '''
-    def __init__(self, gamma=0):
+    def __init__(self, ea_reg = False, gamma=0):
         super(MEE, self).__init__()
         self.gamma = gamma
+        self.ea_reg = ea_reg
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     def forward(self, logits, targets):
         batch, timepoints, classes = logits.shape
@@ -276,8 +288,8 @@ class MEE(nn.Module):
             
             ordinal_dist = g(torch.arange(classes, dtype=torch.float64), gamma=self.gamma).to(self.device)
             targets_t = g(targets_t, gamma=self.gamma)
-            loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2)# + exp_arg(preds_t, gamma=self.gamma))
-            loss += loss_t
+            loss_t = wc_t * ((preds_t @ ordinal_dist - targets_t)**2 + self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
+            loss += torch.mean(loss_t)
 
         return loss / timepoints
 
@@ -287,9 +299,10 @@ class MPE(nn.Module):
     Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
     Used as an ablation of the class expectation in the MEE loss.
     '''
-    def __init__(self, gamma=0):
+    def __init__(self, ea_reg = False, gamma=0):
         super(MPE, self).__init__()
         self.gamma = gamma
+        self.ea_reg = ea_reg
 
     def forward(self, logits, targets):
         batch, timepoints, classes = logits.shape
@@ -306,7 +319,7 @@ class MPE(nn.Module):
             wc_t = class_weights[t][targets_t.to(int)]
             wo_t = ordinal_weights(preds_t, targets_t, gamma=self.gamma)
 
-            loss_t = torch.mean(wc_t * wo_t)# + exp_arg(preds_t, gamma=self.gamma))
-            loss += loss_t
+            loss_t = wc_t * (wo_t + self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
+            loss += torch.mean(loss_t)
 
         return (loss / timepoints).requires_grad_()
