@@ -237,7 +237,7 @@ class OCE(nn.Module):
             true_class_mask = F.one_hot(targets_t.long(), classes)
 
             # Construct matrix of ordinal distances of shape (batch, classes).
-            indices_t = g(torch.arange(classes), gamma=self.gamma).expand(len(targets_t), classes)
+            indices_t = g(torch.arange(classes), gamma=self.gamma).expand(len(targets_t), classes).to(self.device)
             adjusted_targets_t = g(targets_t, gamma=self.gamma).unsqueeze(1)
             wo_t = (torch.abs(indices_t-adjusted_targets_t) / (classes - 1 + self.gamma) + 1) * (1-true_class_mask)
 
@@ -245,7 +245,7 @@ class OCE(nn.Module):
             log_false_class = -torch.log(1 - preds_t)
 
             log_loss_matrix = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class)
-            loss_t = torch.mean(log_loss_matrix, dim=1) + exp_arg(preds_t, gamma=self.gamma)
+            loss_t = torch.mean(log_loss_matrix, dim=1)# + exp_arg(preds_t, gamma=self.gamma)
             loss += torch.mean(loss_t)
 
         return loss / timepoints
@@ -274,9 +274,9 @@ class MEE(nn.Module):
             # Get batch length vector of class weights
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
             
-            ordinal_dist = g(torch.arange(classes), gamma=self.gamma)
+            ordinal_dist = g(torch.arange(classes, dtype=torch.float64), gamma=self.gamma).to(self.device)
             targets_t = g(targets_t, gamma=self.gamma)
-            loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2 + exp_arg(preds_t, gamma=self.gamma))
+            loss_t = torch.mean(wc_t * (preds_t @ ordinal_dist - targets_t)**2)# + exp_arg(preds_t, gamma=self.gamma))
             loss += loss_t
 
         return loss / timepoints
@@ -306,7 +306,7 @@ class MPE(nn.Module):
             wc_t = class_weights[t][targets_t.to(int)]
             wo_t = ordinal_weights(preds_t, targets_t, gamma=self.gamma)
 
-            loss_t = torch.mean(wc_t * wo_t + exp_arg(preds_t, gamma=self.gamma))
+            loss_t = torch.mean(wc_t * wo_t)# + exp_arg(preds_t, gamma=self.gamma))
             loss += loss_t
 
         return (loss / timepoints).requires_grad_()
