@@ -125,7 +125,7 @@ model_config_7:
   gamma: 0                            # Hyperparameter for relative ordinal weighting
   batch: 32                           # Batch size
 
-# 7 with layernorm
+# Previous with layernorm
 model_config_8:
   cell: "LSTM"                        # Options: RNN, GRU, LSTM,
   input_size: 210                     # Number of features for model

@@ -67,8 +67,6 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
                 
                 y_train = y_params(y_train, train_lengths)
                 y_val = y_params(y_val, val_lengths)
-                print(y_val[0])
-                print(y_val[1])
                 y_test = y_params(y_test, test_lengths)
 
             else:
@@ -120,8 +118,8 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
             with torch.no_grad():
                 outputs = model(X_test, test_lengths)
                 predicted = F.softmax(outputs, -1)
-                y_pred.extend(predicted.cpu().numpy())
 
+                y_pred.extend(predicted.cpu().numpy())
                 y_true.extend(y_test.cpu().numpy())
     
         all_y_true.append(y_true)
