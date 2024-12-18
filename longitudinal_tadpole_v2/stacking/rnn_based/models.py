@@ -6,6 +6,8 @@ from torch.nn import ReLU, Tanh, Softmax
 from torch.nn import Dropout, BatchNorm1d, LayerNorm
 import numpy as np
 import torch.nn.functional as F
+from torch.distributions.beta import Beta
+from torch.distributions.kl import kl_divergence
 
 class TimeDistributed(nn.Module):
     '''
@@ -47,7 +49,7 @@ class LongitudinalStacker(nn.Module):
     Cofigurable Longitudinal Stacker. 
     Can customize architecture, cell type, regularization, and classification head.
     '''
-    def __init__(self, cell, input_size, hidden_state_sizes, dropout, reg_layer, classifier):
+    def __init__(self, cell, input_size, hidden_state_sizes, dropout, reg_layer, classifier, output_size=3):
         super(LongitudinalStacker, self).__init__()
         self.cell = cell
         self.input_size = input_size
@@ -55,6 +57,7 @@ class LongitudinalStacker(nn.Module):
         self.dropout = dropout
         self.reg_layer = reg_layer
         self.classifier = classifier
+        self.output_size = output_size
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         self.layers = nn.ModuleList([
@@ -72,7 +75,8 @@ class LongitudinalStacker(nn.Module):
         ])
         
         if self.classifier == 'longitudinal':
-            self.output_layer = cell(hidden_state_sizes[-1], 3, batch_first=True,  dtype=torch.float64, device=self.device)
+            # 2 for kl divergence
+            self.output_layer = cell(hidden_state_sizes[-1], self.output_size, batch_first=True,  dtype=torch.float64, device=self.device)
         
         elif self.classifier == 'time distributed':
             h = hidden_state_sizes[-1]
@@ -82,7 +86,7 @@ class LongitudinalStacker(nn.Module):
                                Linear(h // 2, h // 4, dtype=torch.float64, device=self.device),
                                Tanh(),
                                Dropout(self.dropout),
-                               Linear(h // 4, 3, dtype=torch.float64, device=self.device)]
+                               Linear(h // 4, self.output_size, dtype=torch.float64, device=self.device)]
             self.output_layer = TimeDistributed(Sequential(*classifying_mlp))
 
     def forward(self, x, lengths):
@@ -104,7 +108,7 @@ class LongitudinalStacker(nn.Module):
         return x
 
 # Helper functions for losses
-def filter_padding(tensor):
+def unpad(tensor):
     '''
     Return dense tensors for loss computation.
     '''
@@ -122,7 +126,7 @@ def timed_class_weights(targets, classes=[0,1,2]):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     timed_weights = []
     for y_time in targets.T: #iterate over time slices
-        y_time = filter_padding(y_time)
+        y_time = unpad(y_time)
         y_time = torch.tensor([(y_time==class_label).sum() for class_label in classes])
         weights = sum(y_time) / (len(y_time) * y_time)
         timed_weights.append(weights.to(device))
@@ -187,10 +191,10 @@ class OCWCCE(nn.Module):
 
         loss = 0
         for t in range(timepoints):
-            logits_t = filter_padding(logits[:,t,:])  
+            logits_t = unpad(logits[:,t,:])  
             preds_t = F.softmax(logits_t, dim=-1)
 
-            targets_t = filter_padding(targets[:,t])
+            targets_t = unpad(targets[:,t])
   
             wc_t = class_weights[t][targets_t.to(int)]
 
@@ -215,7 +219,7 @@ class OCE(nn.Module):
     Changing distance between adjacent classes is accounted for with tuneable gamma hyperparameter.
     Similar to: https://aclanthology.org/2022.coling-1.407/ with term for positive class and variable ordinal distances.
     '''
-    def __init__(self, ea_reg = False, gamma=0):
+    def __init__(self, ea_reg=False, gamma=0):
         super(OCE, self).__init__()
         self.gamma = gamma
         self.ea_reg = ea_reg
@@ -237,9 +241,9 @@ class OCE(nn.Module):
         loss = 0
         for t in range(timepoints):
             # Filter and activate
-            logits_t = filter_padding(logits[:,t,:])  
+            logits_t = unpad(logits[:,t,:])  
             preds_t = F.softmax(logits_t, dim=-1)
-            targets_t = filter_padding(targets[:,t])
+            targets_t = unpad(targets[:,t])
 
             # Get batch length vector of class weights
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
@@ -256,7 +260,7 @@ class OCE(nn.Module):
             log_false_class = -torch.log(1 - preds_t)
             
             # push wc_t outside reg term
-            loss_t = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class + self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
+            loss_t = wc_t * (true_class_mask * log_true_class + wo_t * log_false_class)#+ self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
             loss += torch.mean(loss_t)
 
         return loss / timepoints
@@ -279,9 +283,9 @@ class MEE(nn.Module):
         loss = 0
         for t in range(timepoints):
             # Filter and activate
-            logits_t = filter_padding(logits[:,t,:])  
+            logits_t = unpad(logits[:,t,:])  
             preds_t = F.softmax(logits_t, dim=-1)
-            targets_t = filter_padding(targets[:,t])
+            targets_t = unpad(targets[:,t])
             
             # Get batch length vector of class weights
             wc_t = class_weights[t][targets_t.to(int)].unsqueeze(1)
@@ -311,9 +315,9 @@ class MPE(nn.Module):
         loss = 0
         for t in range(timepoints):
             # Filter and activate
-            logits_t = filter_padding(logits[:,t,:])  
+            logits_t = unpad(logits[:,t,:])  
             preds_t = F.softmax(logits_t, dim=-1)
-            targets_t = filter_padding(targets[:,t])
+            targets_t = unpad(targets[:,t])
             
             # Get batch length vector of class weights
             wc_t = class_weights[t][targets_t.to(int)]
@@ -322,4 +326,66 @@ class MPE(nn.Module):
             loss_t = wc_t * (wo_t + self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
             loss += torch.mean(loss_t)
 
+        return (loss / timepoints).requires_grad_()
+
+class KLBeta(nn.Module):
+    '''
+    We represent the true diagnoses and predictions 
+    as the parameters of a concave beta distribution
+    reparameterized in terms of the mode, w, and concentration, c.
+    mean = w + 1/c
+    '''
+    def __init__(self, gamma=0):
+        super(KLBeta, self).__init__()
+        self.gamma = gamma
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    def _reparameterize(self, params):
+        w,c = params[:,0], params[:,1]
+        alpha = c*w+1
+        beta = c*(1-w)+1
+        return alpha, beta
+    
+    def labels_to_beta(dx, classes=3, gamma=0):
+        ''' 
+        Function for transforming a label sequence into 
+        parameters of a non-stationary beta distribution.
+        Called into training file.
+        '''
+        # Change wrt gamma
+        dx = dx.int().numpy()
+        w_0 = [(c + 1) / (classes + 1) for c in range(classes)]
+        c = [5]
+        w = [w_0[int(dx[0])]]
+
+        for t in range(1,len(dx)):
+            if dx[t] == dx[t-1]:
+                w.append(np.clip(w[t-1] + (dx[t]-1) / 10, 0,1))
+                c.append(c[t-1]+1)
+            else:
+                w.append(w_0[dx[t]] + (dx[t-1] - dx[t]) / 10)
+                c.append(5)
+        return torch.tensor(np.stack([w,c,dx])).T
+
+    def forward(self, logits, targets):
+        batch, timepoints, params = logits.shape
+        class_weights = timed_class_weights(targets[:,:,-1])
+
+        loss = 0 
+        for t in range(timepoints):
+            targets_t = unpad(targets[:,t,:])
+            logits_t = unpad(logits[:,t,:])
+            preds_t = F.sigmoid(logits_t) * torch.tensor([1,10]) 
+
+            wc_t = class_weights[t][targets_t[:,-1].to(int)]
+
+            target_alpha, target_beta = self._reparameterize(targets_t[:,:-1])
+            pred_alpha, pred_beta = self._reparameterize(preds_t)
+            
+            target_dist = [Beta(alpha, beta) for alpha, beta in zip(target_alpha, target_beta)]
+            pred_dist = [Beta(alpha, beta) for alpha, beta in zip(pred_alpha, pred_beta)]
+
+            loss_t = torch.tensor([kl_divergence(target,pred) for target, pred in zip(target_dist, pred_dist)])
+            loss += torch.mean(wc_t * loss_t)
+        
         return (loss / timepoints).requires_grad_()

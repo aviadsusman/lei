@@ -3,8 +3,9 @@ from torch.optim import Adam, SGD
 import torch.nn as nn
 from torch.nn import LSTM, GRU, RNN, LayerNorm, BatchNorm1d
 from torch.utils.data import TensorDataset, DataLoader
+from torch.nn.utils.rnn import unpad_sequence, pad_sequence
 import torch.nn.functional as F
-from models import LongitudinalStacker, OCWCCE, OCE, MEE, MPE
+from models import LongitudinalStacker, OCWCCE, OCE, MEE, MPE, KLBeta
 import numpy as np
 import yaml
 import argparse
@@ -13,12 +14,12 @@ import os
 from copy import deepcopy
 
 def build_model(cell, input_size, hidden_state_sizes, dropout,
-                regularization_layer, classifier, optimization, loss, gamma, batch):
+                regularization_layer, classifier, optimization, loss, gamma, batch, output_size):
     
     cell_type = {'LSTM': LSTM, 'GRU': GRU, 'RNN': RNN}
     reg_type = {'LayerNorm': LayerNorm, 'BatchNorm1d': BatchNorm1d}
     optimizer_type = {'Adam': Adam, 'SGD': SGD}
-    loss_type = {'OCWCCE': OCWCCE, 'OCE': OCE, 'MEE': MEE, 'MPE': MPE}
+    loss_type = {'OCWCCE': OCWCCE, 'OCE': OCE, 'MEE': MEE, 'MPE': MPE, 'KLBeta': KLBeta}
     
     cell = cell_type[cell]
     reg_layer = reg_type[regularization_layer]
@@ -26,7 +27,8 @@ def build_model(cell, input_size, hidden_state_sizes, dropout,
     loss = loss_type[loss]
     
     model = LongitudinalStacker(cell=cell, input_size=input_size,
-            hidden_state_sizes=hidden_state_sizes, dropout=dropout, reg_layer=reg_layer, classifier=classifier)
+            hidden_state_sizes=hidden_state_sizes, dropout=dropout, 
+            reg_layer=reg_layer, classifier=classifier, output_size=output_size)
     
     loss_fn = loss(gamma)
 
@@ -34,8 +36,6 @@ def build_model(cell, input_size, hidden_state_sizes, dropout,
     
     return model, loss_fn, optim, batch
 
-
-#implement early stopping?
 def training_loop(path_to_data, device, config_dict, num_epochs=100):
     with open(path_to_data, "rb") as file:
         data = pkl.load(file=file)
@@ -54,12 +54,32 @@ def training_loop(path_to_data, device, config_dict, num_epochs=100):
             X_val, y_val = fold_data['X_val'].to(device), fold_data['y_val'].to(device)
             X_test, y_test = fold_data['X_test'].to(device), fold_data['y_test'].to(device)
             train_lengths, val_lengths, test_lengths = fold_data['train lengths'].to('cpu'), fold_data['val lengths'].to('cpu'), fold_data['test lengths'].to('cpu')
+            
+            # When using KLBeta loss, we estimate two parameters rather than 3 probabilities.
+            # Labels are true non-stationary beta parameters.
+            if config_dict['loss'] == 'KLBeta':
+                config_dict['output_size'] = 2
+                
+                def y_params(labels, lengths):
+                    y_list = unpad_sequence(labels, lengths=lengths, batch_first=True)
+                    params = [KLBeta.labels_to_beta(y) for y in y_list]
+                    return pad_sequence(params, batch_first=True, padding_value=float('-inf')).to(device)
+                
+                y_train = y_params(y_train, train_lengths)
+                y_val = y_params(y_val, val_lengths)
+                print(y_val[0])
+                print(y_val[1])
+                y_test = y_params(y_test, test_lengths)
 
+            else:
+                config_dict['output_size'] = 3
+            
             model, loss_fn, optimizer, batch_size = build_model(**config_dict)
 
             train_dataset = TensorDataset(X_train, y_train, train_lengths)
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
+            
             # Early stopping setup. Add to configuration?
             patience = 5
             count = 0
