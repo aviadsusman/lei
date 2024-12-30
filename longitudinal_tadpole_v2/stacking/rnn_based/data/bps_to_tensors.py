@@ -122,6 +122,7 @@ def bp_tensors(dir_path, first_dx_as_feature=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Load in data for processing")
     parser.add_argument('--path', type=str, help='Path to dir of data to be transformed')
+    parser.add_argument('--v1', action='store_true', help='Different pipeline if for v1 cohort')
     args = parser.parse_args()
     dir_path = args.path
 

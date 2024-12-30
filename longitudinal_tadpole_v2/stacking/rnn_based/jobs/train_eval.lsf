@@ -6,7 +6,7 @@
 #BSUB -R rusage[mem=12000]
 #BSUB -n 1
 #BSUB -gpu num=1
-#BSUB -J klb
+#BSUB -J mpe
 #BSUB -W 4:00
 #BSUB -o /sc/arion/projects/pandeg01a/susmaa01/lei/longitudinal_tadpole_v2/stacking/rnn_based/jobs/outputs/outputs_%J.stdout
 #BSUB -eo /sc/arion/projects/pandeg01a/susmaa01/lei/longitudinal_tadpole_v2/stacking/rnn_based/jobs/outputs/outputs_%J.stderr
@@ -19,4 +19,4 @@ ml cuda/12.0.1
 ml cudnn/8.9.5-11
 export XLA_FLAGS=--xla_gpu_cuda_data_dir=/hpc/packages/minerva-centos7/cuda/12.0.1
 nvidia-smi
-python3 train_eval.py --data data/bps/no_sampling/40_5_24_no_mode_data/split_cv_tensors.pkl --config 9
+python3 train_eval.py --data data/bps/no_sampling/40_5_24_no_mode_data/split_cv_tensors.pkl --config 6

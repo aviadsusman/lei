@@ -60,6 +60,7 @@ class LongitudinalStacker(nn.Module):
         self.output_size = output_size
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
+        
         self.layers = nn.ModuleList([
             cell(input_size if i == 0 else hidden_state_sizes[i-1], hidden_state_sizes[i], batch_first=True, dtype=torch.float64, device=self.device)
             for i in range(len(hidden_state_sizes))
@@ -86,6 +87,7 @@ class LongitudinalStacker(nn.Module):
                                Tanh(),
                                Dropout(self.dropout),
                                Linear(h // 4, self.output_size, dtype=torch.float64, device=self.device)]
+            
             self.output_layer = TimeDistributed(Sequential(*classifying_mlp))
 
     def forward(self, x, lengths):
@@ -325,7 +327,7 @@ class MPE(nn.Module):
             loss_t = wc_t * (wo_t + self.ea_reg * exp_arg(preds_t, gamma=self.gamma))
             loss += torch.mean(loss_t)
 
-        return (loss / timepoints).requires_grad_()
+        return loss / timepoints
 
 class KLBeta(nn.Module):
     '''
@@ -376,7 +378,7 @@ class KLBeta(nn.Module):
             logits_t = unpad(logits[:, t, :])
             preds_t = F.sigmoid(logits_t) 
             # Shift concentration to match true labels range [5, 5+T-1]
-            preds_t = preds_t* torch.tensor([1,timepoints-1], device=self.device) + torch.tensor([0,5], device=self.device)
+            preds_t = preds_t * torch.tensor([1,timepoints-1], device=self.device) + torch.tensor([0,5], device=self.device)
 
             wc_t = class_weights[t][targets_t[:,-1].to(int)]
 

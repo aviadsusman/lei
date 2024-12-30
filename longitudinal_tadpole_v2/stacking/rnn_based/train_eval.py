@@ -36,7 +36,7 @@ def build_model(cell, input_size, hidden_state_sizes, dropout,
     
     return model, loss_fn, optim, batch
 
-def training_loop(path_to_data, device, config_dict, num_epochs=100):
+def train_eval_loop(path_to_data, device, config_dict):
     with open(path_to_data, "rb") as file:
         data = pkl.load(file=file)
 
@@ -140,7 +140,7 @@ if __name__=='__main__':
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
-    y_true, y_pred = training_loop(path_to_data=data_path, device=device, config_dict=config_dict, num_epochs=100) #change to early stopping
+    y_true, y_pred = train_eval_loop(path_to_data=data_path, device=device, config_dict=config_dict) #change to early stopping
     
     results_path = data_path.replace('data/bps', 'results').replace('split_cv_tensors.pkl', f'config_{config}.pkl')
     results_dir = os.path.dirname(results_path)
