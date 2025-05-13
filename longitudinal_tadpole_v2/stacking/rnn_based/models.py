@@ -352,6 +352,13 @@ class KLBeta(nn.Module):
         Function for transforming a label sequence into 
         parameters of a non-stationary beta distribution.
         Called into training file.
+
+        If the dx is stationary between consecutive time points, 
+        increase c and shift w towards the starting mode of the dx.
+        (Change this)
+
+        If the dx changes, reset w to the appropriate starting mode
+        and reset c to the base confidence.
         '''
         # Update to include gamma shifting
         dx = dx.int().cpu().numpy()
